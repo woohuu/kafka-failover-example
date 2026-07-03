@@ -1,0 +1,91 @@
+spring:
+  application:
+    name: kafka-multiregion-failover
+
+  cloud:
+    stream:
+      # Two independent Kafka binders — one per MSK cluster/region.
+      # Both stay configured at all times; the FailoverStateManager decides
+      # which one StreamBridge routes each send to.
+      binders:
+        kafka-primary:
+          type: kafka
+          environment:
+            spring:
+              cloud:
+                stream:
+                  kafka:
+                    binder:
+                      brokers: ${MSK_PRIMARY_BROKERS}   # us-east-1 bootstrap servers
+                      configuration:
+                        security.protocol: SASL_SSL
+                        sasl.mechanism: AWS_MSK_IAM
+                        sasl.jaas.config: software.amazon.msk.auth.iam.IAMLoginModule required;
+                        sasl.client.callback.handler.class: software.amazon.msk.auth.iam.IAMClientCallbackHandler
+        kafka-secondary:
+          type: kafka
+          environment:
+            spring:
+              cloud:
+                stream:
+                  kafka:
+                    binder:
+                      brokers: ${MSK_SECONDARY_BROKERS} # us-west-2 bootstrap servers
+                      configuration:
+                        security.protocol: SASL_SSL
+                        sasl.mechanism: AWS_MSK_IAM
+                        sasl.jaas.config: software.amazon.msk.auth.iam.IAMLoginModule required;
+                        sasl.client.callback.handler.class: software.amazon.msk.auth.iam.IAMClientCallbackHandler
+
+      bindings:
+        # Producer binding used via StreamBridge. The binder is chosen at
+        # send time by ResilientKafkaProducer, so no binder is pinned here.
+        orderEvents-out-0:
+          destination: order-events
+          producer:
+            required-groups: []
+
+      kafka:
+        bindings:
+          orderEvents-out-0:
+            producer:
+              # sync=true makes StreamBridge.send() block until the broker
+              # acks (or fails). REQUIRED for correct failover: without it,
+              # send() returns true before the broker responds and outages
+              # would go undetected by the passive signal path.
+              sync: true
+        default:
+          producer:
+            configuration:
+              acks: all
+              enable.idempotence: true
+              # Bound how long the client retries internally before
+              # surfacing the failure to our failover logic.
+              delivery.timeout.ms: 10000
+              request.timeout.ms: 5000
+              max.block.ms: 5000
+
+app:
+  kafka:
+    failover:
+      primary-binder: kafka-primary
+      secondary-binder: kafka-secondary
+      primary-bootstrap-servers: ${MSK_PRIMARY_BROKERS}
+      secondary-bootstrap-servers: ${MSK_SECONDARY_BROKERS}
+      probe-interval: 10s          # active health check cadence
+      probe-timeout: 5s
+      failure-threshold: 3         # consecutive failures before failover
+      failback-success-threshold: 6 # consecutive healthy probes before failback
+      min-dwell: 5m                # minimum time on secondary (anti-flapping)
+      # The probe AdminClient must use the same auth as the binders
+      probe-client-config:
+        "[security.protocol]": SASL_SSL
+        "[sasl.mechanism]": AWS_MSK_IAM
+        "[sasl.jaas.config]": software.amazon.msk.auth.iam.IAMLoginModule required;
+        "[sasl.client.callback.handler.class]": software.amazon.msk.auth.iam.IAMClientCallbackHandler
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
