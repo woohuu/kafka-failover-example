@@ -1,9 +1,13 @@
-# hello-world
-A testing repository for learning GitHub
+# kafka-failover-example
 
-Hello everyone,
+A Spring Boot / Spring Cloud Stream example demonstrating producer-side
+resiliency for AWS MSK across two regions (us-east-1 primary, us-west-2
+secondary), with automatic circuit-breaker-style failover and failback.
 
-This file is for demonstration purpose. It is in edits branch and I will commit the changes made here and then merge the commit into the master branch.\
-Thanks!
+See [MULTI_REGION_FAILOVER.md](MULTI_REGION_FAILOVER.md) for the full
+architecture write-up.
 
-09/08/2018
+## CI
+
+Every push and pull request to `master` runs the build and test suite via
+GitHub Actions (`.github/workflows/ci.yml`).
